@@ -1,0 +1,16 @@
+[Unit]
+Description=Medical Assistant FastAPI backend
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/medical-assistant
+EnvironmentFile=/home/ubuntu/medical-assistant/.env
+Environment=PATH=/home/ubuntu/.local/bin:/usr/bin:/bin
+ExecStart=/home/ubuntu/.local/bin/uv run uvicorn backend.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

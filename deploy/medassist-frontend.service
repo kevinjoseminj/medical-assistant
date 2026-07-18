@@ -1,0 +1,17 @@
+[Unit]
+Description=Medical Assistant Streamlit frontend
+After=network.target medassist-backend.service
+Wants=medassist-backend.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/medical-assistant
+EnvironmentFile=/home/ubuntu/medical-assistant/.env
+Environment=PATH=/home/ubuntu/.local/bin:/usr/bin:/bin
+ExecStart=/home/ubuntu/.local/bin/uv run streamlit run frontend/app.py --server.port 8501 --server.address 127.0.0.1 --server.headless true
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
