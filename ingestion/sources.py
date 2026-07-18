@@ -41,6 +41,10 @@ MEDLINEPLUS_TOPICS = [
     "gallstones",
     "acne",
     "psoriasis",
+    "heart disease",
+    "heart attack",
+    "stroke",
+    "chest pain",
 ]
 
 # (url, label) — label is used as the citation title if the page's <title>
