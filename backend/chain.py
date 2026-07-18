@@ -1,11 +1,8 @@
+from typing import Callable, Optional
+
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import (
-    Runnable,
-    RunnableLambda,
-    RunnableParallel,
-    RunnablePassthrough,
-)
+from langchain_core.runnables import Runnable, RunnableLambda
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
@@ -36,7 +33,8 @@ DISCLAIMER = (
 )
 
 SYSTEM_PROMPT = """You are a health-information assistant. Answer using ONLY \
-the context below, drawn from public health reference sources (MedlinePlus, WHO).
+the context below. It may include public health reference sources \
+(MedlinePlus, WHO) and/or a document the user uploaded.
 
 Rules:
 - Only answer general informational questions ("what is X", "what are common \
@@ -47,6 +45,17 @@ instead of guessing.
 they personally should do, do not diagnose or give personalized medical advice. \
 Explain that you can't do that and recommend they consult a healthcare provider. \
 You may still share general context-backed information on the topic if relevant.
+- If the user asks you to judge whether their own personal reading, lab \
+result, vital sign, or measurement (including values found in an uploaded \
+document) is normal, abnormal, good, or concerning, do NOT render that \
+judgment in any form. You may state the general reference range for that \
+measurement from the context (e.g. "normal fasting blood sugar is typically \
+under 100 mg/dL"), but do NOT restate the user's own value alongside a \
+verdict word or phrase about it — no "which is normal", "falls within the \
+normal range", "is elevated", "is within/outside range", or similar, even \
+softened. State the range on its own and stop there; let the user draw any \
+comparison themselves. Make clear that assessing a specific personal value \
+requires a healthcare provider, not you.
 - Never claim to be a doctor or medical professional.
 - Be concise.
 
@@ -74,17 +83,36 @@ def format_sources(docs: list[Document]) -> list[SourceRef]:
     return sources
 
 
-def build_chain(retriever: Runnable) -> Runnable:
-    """Build a chain: question (str) -> {"answer": str, "docs": list[Document]}.
+def build_chain(
+    base_retriever: Runnable,
+    get_session_retriever: Callable[[str], Optional[Runnable]],
+) -> Runnable:
+    """Build a chain: {"question": str, "session_id": str | None} -> {"answer": str, "docs": list[Document]}.
 
-    ``docs`` is only populated when the model reports it actually grounded
-    the answer in the retrieved context — refusals/redirects (e.g. diagnosis
-    requests) return an empty source list instead of citing whatever the
-    retriever happened to return for an off-corpus query.
+    Retrieval always includes the base corpus; when ``session_id`` maps to a
+    live upload session (via ``get_session_retriever``), that session's docs
+    are appended so an uploaded PDF is queryable alongside the base corpus.
+
+    ``docs`` in the output is only populated when the model reports it
+    actually grounded the answer in the retrieved context — refusals/
+    redirects (e.g. diagnosis requests) return an empty source list instead
+    of citing whatever the retriever happened to return for an off-corpus
+    query.
     """
     model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     structured_model = model.with_structured_output(AnswerOutput)
     answer_chain = PROMPT | structured_model
+
+    def retrieve(inputs: dict) -> dict:
+        question = inputs["question"]
+        docs = list(base_retriever.invoke(question))
+
+        session_id = inputs.get("session_id")
+        session_retriever = get_session_retriever(session_id) if session_id else None
+        if session_retriever is not None:
+            docs = docs + list(session_retriever.invoke(question))
+
+        return {"question": question, "docs": docs}
 
     def generate(inputs: dict) -> dict:
         docs = inputs["docs"]
@@ -93,7 +121,4 @@ def build_chain(retriever: Runnable) -> Runnable:
         )
         return {"answer": result.answer, "docs": docs if result.grounded_in_context else []}
 
-    return (
-        RunnableParallel(docs=retriever, question=RunnablePassthrough())
-        | RunnableLambda(generate)
-    )
+    return RunnableLambda(retrieve) | RunnableLambda(generate)
